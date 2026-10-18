@@ -187,6 +187,7 @@ function getMessageFromEntry(entry: SessionEntry): AgentMessage | undefined {
  *
  * Also collects file operations from:
  * - Tool calls in assistant messages
+ * - Nested calls recorded on tool results (codemode)
  * - Existing branch_summary entries' details (for cumulative tracking)
  *
  * @param entries - Entries in chronological order
@@ -218,6 +219,11 @@ export function prepareBranchEntries(entries: SessionEntry[], tokenBudget: numbe
 	// Second pass: walk from newest to oldest, adding messages until token budget
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const entry = entries[i];
+		// Tool results stay out of the summary text, but codemode results record nested file operations.
+		if (entry.type === "message" && entry.message.role === "toolResult") {
+			extractFileOpsFromMessage(entry.message, fileOps);
+			continue;
+		}
 		const message = getMessageFromEntry(entry);
 		if (!message) continue;
 
