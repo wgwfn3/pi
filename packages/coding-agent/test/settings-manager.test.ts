@@ -216,6 +216,51 @@ describe("SettingsManager", () => {
 		});
 	});
 
+	describe("applyOverrides", () => {
+		it("keeps overrides when an unrelated setting is saved", async () => {
+			const manager = SettingsManager.inMemory({ theme: "dark", compaction: { enabled: true } });
+			manager.applyOverrides({ theme: "light", compaction: { enabled: false } });
+
+			manager.setDefaultThinkingLevel("low");
+			await manager.flush();
+
+			expect(manager.getTheme()).toBe("light");
+			expect(manager.getCompactionEnabled()).toBe(false);
+			expect(manager.getDefaultThinkingLevel()).toBe("low");
+			// Overrides are session-only and must not be written to the settings file.
+			expect(manager.getGlobalSettings()).toEqual({
+				theme: "dark",
+				compaction: { enabled: true },
+				defaultThinkingLevel: "low",
+			});
+		});
+
+		it("keeps overrides across reload and project setting writes", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			manager.applyOverrides({ retry: { enabled: false } });
+
+			manager.setProjectPackages(["npm:example"]);
+			await manager.flush();
+			expect(manager.getRetryEnabled()).toBe(false);
+
+			await manager.reload();
+			expect(manager.getRetryEnabled()).toBe(false);
+		});
+
+		it("lets a setter replace only the override of the field it sets", async () => {
+			const manager = SettingsManager.inMemory({});
+			manager.applyOverrides({ theme: "light", compaction: { enabled: false, keepRecentTokens: 1 } });
+
+			manager.setTheme("dark");
+			manager.setCompactionEnabled(true);
+			await manager.flush();
+
+			expect(manager.getTheme()).toBe("dark");
+			expect(manager.getCompactionEnabled()).toBe(true);
+			expect(manager.getCompactionKeepRecentTokens()).toBe(1);
+		});
+	});
+
 	describe("theme setting", () => {
 		it("stores slash-separated automatic theme settings separately from fixed theme names", async () => {
 			const settingsPath = join(agentDir, "settings.json");
