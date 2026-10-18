@@ -908,6 +908,22 @@ describe("Coding Agent Tools", () => {
 			expect(output).not.toContain("match two");
 		});
 
+		it("should keep context line numbers aligned with ripgrep when a line contains a lone carriage return", async () => {
+			const testFile = join(testDir, "progress.log");
+			writeFileSync(testFile, "progress 10%\rprogress 100%\nstep two\nERROR: boom\nstep four\n");
+
+			const result = await grepTool.execute("test-call-grep-lone-cr", {
+				pattern: "ERROR",
+				path: testFile,
+				context: 1,
+			});
+
+			const output = getTextOutput(result);
+			expect(output).toContain("progress.log-2- step two");
+			expect(output).toContain("progress.log:3: ERROR: boom");
+			expect(output).toContain("progress.log-4- step four");
+		});
+
 		it("should treat flag-like patterns as search text", async () => {
 			const marker = join(testDir, "grep-injection-marker");
 			const payload = join(testDir, "payload.sh");
