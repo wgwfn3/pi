@@ -274,6 +274,7 @@ export class SettingsManager {
 	private globalSettings: Settings;
 	private projectSettings: Settings;
 	private settings: Settings;
+	private runtimeOverrides: Settings = {}; // Session-only values from applyOverrides(), layered over global and project
 	private projectTrusted: boolean;
 	private modifiedFields = new Set<keyof Settings>(); // Track global fields modified during session
 	private modifiedNestedFields = new Map<keyof Settings, Set<string>>(); // Track global nested field modifications
@@ -304,6 +305,14 @@ export class SettingsManager {
 		this.errors = [...initialErrors];
 		this.settingsPaths = settingsPaths;
 		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+	}
+
+	/** Recompute the effective settings: global, then project, then runtime overrides. */
+	private recomputeSettings(): void {
+		this.settings = deepMergeSettings(
+			deepMergeSettings(this.globalSettings, this.projectSettings),
+			this.runtimeOverrides,
+		);
 	}
 
 	/** Create a SettingsManager that loads from files */
@@ -484,7 +493,7 @@ export class SettingsManager {
 		if (!trusted) {
 			this.projectSettings = {};
 			this.projectSettingsLoadError = null;
-			this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+			this.recomputeSettings();
 			return;
 		}
 
@@ -494,7 +503,7 @@ export class SettingsManager {
 		if (projectLoad.error) {
 			this.recordError("project", projectLoad.error);
 		}
-		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+		this.recomputeSettings();
 	}
 
 	async reload(): Promise<void> {
@@ -522,16 +531,33 @@ export class SettingsManager {
 			this.recordError("project", projectLoad.error);
 		}
 
-		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+		this.recomputeSettings();
 	}
 
-	/** Apply additional overrides on top of current settings */
+	/**
+	 * Apply additional overrides on top of current settings. Overrides last for the lifetime of this
+	 * manager and survive saves and reloads; a setter only replaces the override of the field it sets.
+	 */
 	applyOverrides(overrides: Partial<Settings>): void {
-		this.settings = deepMergeSettings(this.settings, overrides);
+		this.runtimeOverrides = deepMergeSettings(this.runtimeOverrides, overrides);
+		this.recomputeSettings();
+	}
+
+	/** Drop the runtime override of a field that a setter changed, so the explicitly set value takes effect */
+	private clearRuntimeOverride(field: keyof Settings, nestedKey?: string): void {
+		const override = this.runtimeOverrides[field];
+		if (nestedKey && isMergeableObject(override)) {
+			const rest: Record<string, unknown> = { ...override };
+			delete rest[nestedKey];
+			(this.runtimeOverrides as Record<string, unknown>)[field] = rest;
+			return;
+		}
+		delete this.runtimeOverrides[field];
 	}
 
 	/** Mark a global field as modified during this session */
 	private markModified(field: keyof Settings, nestedKey?: string): void {
+		this.clearRuntimeOverride(field, nestedKey);
 		this.modifiedFields.add(field);
 		if (nestedKey) {
 			if (!this.modifiedNestedFields.has(field)) {
@@ -543,6 +569,7 @@ export class SettingsManager {
 
 	/** Mark a project field as modified during this session */
 	private markProjectModified(field: keyof Settings, nestedKey?: string): void {
+		this.clearRuntimeOverride(field, nestedKey);
 		this.modifiedProjectFields.add(field);
 		if (nestedKey) {
 			if (!this.modifiedProjectNestedFields.has(field)) {
@@ -627,7 +654,7 @@ export class SettingsManager {
 	}
 
 	private save(): void {
-		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+		this.recomputeSettings();
 
 		if (this.globalSettingsLoadError) {
 			return;
@@ -645,7 +672,7 @@ export class SettingsManager {
 	private saveProjectSettings(settings: Settings): void {
 		this.assertProjectTrustedForWrite();
 		this.projectSettings = structuredClone(settings);
-		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+		this.recomputeSettings();
 
 		if (this.projectSettingsLoadError) {
 			return;
