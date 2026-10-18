@@ -150,7 +150,9 @@ export function createGrepToolDefinition(
 							if (!lines) {
 								try {
 									const content = await ops.readFile(filePath);
-									lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+									// Split only on \n: ripgrep numbers lines by \n, so a lone \r must not start a new line.
+									// formatBlock strips the remaining \r characters for display.
+									lines = content.split("\n");
 								} catch {
 									lines = [];
 								}
